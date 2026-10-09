@@ -36,7 +36,9 @@ jobs:
     permissions:
       contents: read
     strategy:
-      fail-fast: true
+      # A failure in one half leaves the other running, so the layer's hours of
+      # compiling still finish and fill the compiler cache for the next run.
+      fail-fast: false
       matrix:
         part: [programs, compat]
     env:
