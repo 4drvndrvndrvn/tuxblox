@@ -27,10 +27,12 @@
 # fetched here: stb keeps its text inline in the (large, mostly-code) header.
 
 set(JSON_LICENSE_URL "https://raw.githubusercontent.com/nlohmann/json/v3.11.3/LICENSE.MIT")
-set(LGPL21_LICENSE_URL "https://www.gnu.org/licenses/old-licenses/lgpl-2.1.txt")
 set(GENERATED_DIR "${CMAKE_BINARY_DIR}/generated")
 set(JSON_LICENSE_TXT_PATH "${GENERATED_DIR}/json-LICENSE.MIT")
-set(LGPL21_LICENSE_TXT_PATH "${GENERATED_DIR}/lgpl-2.1.txt")
+# Kept beside this file rather than fetched: www.gnu.org refuses connections from
+# many hosted build machines, GitHub's among them. A copy of the text Wine ships
+# (third_party_licenses/wine/COPYING.LIB), since this build only sees its own folder.
+set(LGPL21_LICENSE_TXT_PATH "${CMAKE_SOURCE_DIR}/cmake/lgpl-2.1.txt")
 set(JSON_LICENSE_HEADER_PATH "${GENERATED_DIR}/json_license_txt.h")
 set(LGPL21_LICENSE_HEADER_PATH "${GENERATED_DIR}/lgpl21_license_txt.h")
 
@@ -49,12 +51,11 @@ add_custom_command(
 
 add_custom_command(
     OUTPUT ${LGPL21_LICENSE_HEADER_PATH}
-    COMMAND ${CMAKE_COMMAND} -DURL=${LGPL21_LICENSE_URL} -DDEST=${LGPL21_LICENSE_TXT_PATH}
-            -P ${CMAKE_SOURCE_DIR}/cmake/DownloadFile.cmake
     COMMAND ${CMAKE_COMMAND} -DINPUT=${LGPL21_LICENSE_TXT_PATH} -DOUTPUT=${LGPL21_LICENSE_HEADER_PATH}
             -DSYMBOL=kLgpl21LicenseTxt
             -P ${CMAKE_SOURCE_DIR}/cmake/BinToHeader.cmake
-    COMMENT "Fetching and embedding LGPLv2.1 license text (bundled GTK stack)"
+    DEPENDS ${LGPL21_LICENSE_TXT_PATH}
+    COMMENT "Embedding LGPLv2.1 license text (bundled GTK stack)"
     VERBATIM
 )
 
