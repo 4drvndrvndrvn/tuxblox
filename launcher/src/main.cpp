@@ -20,6 +20,8 @@
 #include "ui_adw/message_box.h"
 #include "install_paths.h"
 #include "root_guard.h"
+#include "settings.h"
+#include "sign_in.h"
 #include "headless_launch.h"
 #include "watch_launch.h"
 #include "prefix_file_bridge.h"
@@ -35,6 +37,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <system_error>
 #include <unistd.h>
@@ -60,6 +63,37 @@ int main(int argc, char** argv) {
         return 1;
     }
     setAllowRoot(allowRootRequested);
+
+    // Taken out before any other argument is read, for the same reason as
+    // --allow-root, and as early as possible, since taking it is also what
+    // wipes the password from the process's visible command line.
+    const std::optional<std::string> magicToken = takeMagicTokenFlag(argc, argv);
+    if (magicToken) {
+        const std::optional<SignInCredentials> credentials = parseMagicToken(*magicToken);
+        if (!credentials) {
+            fprintf(stderr, "TuxBlox: --magictoken needs USERNAME:PASSWORD\n");
+            return 1;
+        }
+        std::string dir;
+        try {
+            dir = installDir();
+        } catch (const std::exception& e) {
+            fprintf(stderr, "TuxBlox: %s\n", e.what());
+            return 1;
+        }
+        // Saved like an account typed into Settings > Roblox account, so it
+        // is kept for later launches and the switch there shows it in use.
+        if (!saveSignIn(dir, *credentials)) {
+            fprintf(stderr, "TuxBlox: could not save the --magictoken account to %s\n",
+                    signInFilePath(dir).c_str());
+            return 1;
+        }
+        Settings settings = loadSettings(dir);
+        if (!settings.autoSignIn) {
+            settings.autoSignIn = true;
+            saveSettings(dir, settings);
+        }
+    }
 
     // Before any mode branches below: every one of them either becomes the
     // long-lived process the desktop will display (GUI, --watch-launch) or

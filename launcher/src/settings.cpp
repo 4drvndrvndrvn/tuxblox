@@ -129,7 +129,7 @@ Settings loadSettings(const std::string& installDir) {
         settings.discordRpc = j.value("discord_rpc", false);
         const std::string theme = j.value("theme", std::string("system"));
         settings.theme = isKnownTheme(theme) ? theme : "system";
-        settings.autoSignIn = j.value("auto_sign_in", true);
+        settings.autoSignIn = j.value("auto_sign_in", false);
 
         const auto fastFlags = j.find("fast_flags");
         if (fastFlags != j.end()) {
@@ -223,8 +223,8 @@ std::vector<std::string> launchEnvPairs(const Settings& settings, const std::str
         pairs.push_back("TUXBLOX_DEBUG=1");
     }
 
-    // Nothing while off. The path rather than the account: the environment
-    // reaches every process Roblox starts.
+    // Only the non-default is emitted, as with haptics above. The path rather
+    // than the account: the environment reaches every process Roblox starts.
     // Sent whether or not anything is saved there yet -- a missing file is
     // how the layer learns there is nothing to sign in with.
     if (settings.autoSignIn && !installDir.empty()) {

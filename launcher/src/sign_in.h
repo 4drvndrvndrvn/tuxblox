@@ -75,16 +75,19 @@ bool saveSignIn(const std::string& installDir, const SignInCredentials& credenti
 // Deletes the file. True when no file is left, including when there was none.
 bool forgetSignIn(const std::string& installDir);
 
-// A made-up account, so a fresh install shows automatic sign-in working with
-// nothing to set up first: Studio's login page fills itself in, Log In is
-// pressed, and Roblox answers that the details are wrong. It cannot be anyone's
-// real account -- Roblox usernames may not contain a hyphen -- so the wrong
-// password it sends never counts against a real person. Replaced by typing a
-// real account in Settings > Roblox account.
-SignInCredentials demoSignIn();
+// Reads "--magictoken USERNAME:PASSWORD" (or "--magictoken=USERNAME:PASSWORD")
+// out of argv and removes it, the way takeAllowRootFlag() does, so the
+// positional arguments after it are left where the rest of main() expects
+// them. The value's bytes are wiped in place before it is dropped, so the
+// password stops showing in /proc/<pid>/cmdline and `ps` as soon as the
+// launcher starts -- it is still in the shell's history, which this cannot
+// reach. Empty when the flag is absent; an empty string when it is present
+// without a value. The last one wins if it is given more than once.
+std::optional<std::string> takeMagicTokenFlag(int& argc, char** argv);
 
-// Saves demoSignIn() when no account is saved yet, and leaves a saved one
-// alone. True when a sign-in file is there afterwards.
-bool seedDemoSignIn(const std::string& installDir);
+// Splits a --magictoken value at its first ':'. Roblox usernames are letters,
+// digits and underscores, so the colon can only be the separator; everything
+// after it, colons included, is the password. Empty when either half is.
+std::optional<SignInCredentials> parseMagicToken(const std::string& token);
 
 } // namespace tuxblox

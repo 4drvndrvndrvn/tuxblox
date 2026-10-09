@@ -19,6 +19,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <sys/stat.h>
@@ -155,29 +156,54 @@ int main() {
         assert(loadSignIn(dir).username.empty());
     }
 
-    // The demo account is seeded only where nothing is saved: it never
-    // replaces an account the user typed in.
+    // --magictoken is split at its first colon; the password may hold more.
     {
-        fs::remove_all(dir);
-        assert(seedDemoSignIn(dir));
-        SignInCredentials c = loadSignIn(dir);
-        assert(c.username == demoSignIn().username);
-        assert(c.password == demoSignIn().password);
-
-        assert(saveSignIn(dir, {"mine", "secret"}));
-        assert(seedDemoSignIn(dir));
-        assert(loadSignIn(dir).username == "mine");
+        std::optional<SignInCredentials> c = parseMagicToken("user69:pass:word");
+        assert(c && c->username == "user69" && c->password == "pass:word");
+        assert(!parseMagicToken("user69password"));
+        assert(!parseMagicToken(":password"));
+        assert(!parseMagicToken("user69:"));
+        assert(!parseMagicToken(""));
     }
 
-    // The demo username must never be a real account, or every install would
-    // send a wrong password for someone. Roblox usernames are letters, digits
-    // and at most one underscore -- a hyphen rules it out, and it is not an
-    // email address or a phone number either.
+    // takeMagicTokenFlag() removes the flag and its value wherever they are,
+    // leaves every other argument in order, and wipes the value's bytes.
     {
-        const std::string username = demoSignIn().username;
-        assert(username.find('-') != std::string::npos);
-        assert(username.find('@') == std::string::npos);
-        assert(!demoSignIn().password.empty());
+        char a0[] = "tuxblox", a1[] = "--magictoken", a2[] = "user69:secret", a3[] = "--launch-studio";
+        char* argv[] = {a0, a1, a2, a3, nullptr};
+        int argc = 4;
+        std::optional<std::string> token = takeMagicTokenFlag(argc, argv);
+        assert(token && *token == "user69:secret");
+        assert(argc == 2);
+        assert(std::string(argv[1]) == "--launch-studio");
+        assert(argv[2] == nullptr);
+        assert(a2[0] == '\0');
+    }
+    {
+        char a0[] = "tuxblox", a1[] = "roblox-studio:1", a2[] = "--magictoken=user69:secret";
+        char* argv[] = {a0, a1, a2, nullptr};
+        int argc = 3;
+        std::optional<std::string> token = takeMagicTokenFlag(argc, argv);
+        assert(token && *token == "user69:secret");
+        assert(argc == 2);
+        assert(std::string(argv[1]) == "roblox-studio:1");
+        assert(std::string(a2) == "--magictoken=");
+    }
+    {
+        // Present with nothing after it: an empty token, which parseMagicToken() refuses.
+        char a0[] = "tuxblox", a1[] = "--magictoken";
+        char* argv[] = {a0, a1, nullptr};
+        int argc = 2;
+        std::optional<std::string> token = takeMagicTokenFlag(argc, argv);
+        assert(token && token->empty());
+        assert(argc == 1);
+    }
+    {
+        char a0[] = "tuxblox", a1[] = "--launch-player";
+        char* argv[] = {a0, a1, nullptr};
+        int argc = 2;
+        assert(!takeMagicTokenFlag(argc, argv));
+        assert(argc == 2);
     }
 
     // The file is written into a directory that does not exist yet, the way a

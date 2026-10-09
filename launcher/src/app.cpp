@@ -67,9 +67,6 @@ App::App(std::string installDir, std::string currentVersion, std::string launche
     // window exists before that potential stall. See Finding 5, 2026-07-28
     // final review.
     snapshot_.settings = loadSettings(installDir_);
-    // Before the window reads it, so a fresh install's Settings page shows the
-    // demo account that is about to be used. See demoSignIn().
-    if (snapshot_.settings.autoSignIn) seedDemoSignIn(installDir_);
     // Prefix-first, not versions.json-first: a deleted or stale manifest
     // must not make an already-installed Roblox look uninstalled (the
     // Start tab would offer "Install & Launch" for something that's

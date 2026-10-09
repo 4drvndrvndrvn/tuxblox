@@ -17,6 +17,7 @@
 #include "sign_in.h"
 #include <cerrno>
 #include <cstdio>
+#include <cstring>
 #include <fcntl.h>
 #include <filesystem>
 #include <fstream>
@@ -159,20 +160,49 @@ bool saveSignIn(const std::string& installDir, const SignInCredentials& credenti
     return true;
 }
 
-SignInCredentials demoSignIn() {
-    return {"tuxblox-demo-user", "tuxblox-demo-password"};
-}
-
-bool seedDemoSignIn(const std::string& installDir) {
-    std::error_code ec;
-    if (fs::exists(signInFilePath(installDir), ec)) return true;
-    return saveSignIn(installDir, demoSignIn());
-}
-
 bool forgetSignIn(const std::string& installDir) {
     std::error_code ec;
     fs::remove(signInFilePath(installDir), ec);
     return !ec;
+}
+
+std::optional<std::string> takeMagicTokenFlag(int& argc, char** argv) {
+    static const char kFlag[] = "--magictoken";
+    static const size_t kFlagLength = sizeof(kFlag) - 1;
+
+    std::optional<std::string> token;
+    for (int i = 1; i < argc;) {
+        char* const arg = argv[i];
+        int taken = 0;
+        char* value = nullptr;
+        if (std::strcmp(arg, kFlag) == 0) {
+            taken = 1;
+            if (i + 1 < argc) {
+                value = argv[i + 1];
+                taken = 2;
+            }
+        } else if (std::strncmp(arg, kFlag, kFlagLength) == 0 && arg[kFlagLength] == '=') {
+            taken = 1;
+            value = arg + kFlagLength + 1;
+        }
+        if (taken == 0) {
+            i++;
+            continue;
+        }
+
+        token = value ? std::string(value) : std::string();
+        if (value) std::memset(value, 0, std::strlen(value));
+        for (int j = i; j + taken < argc; j++) argv[j] = argv[j + taken];
+        argc -= taken;
+        argv[argc] = nullptr;
+    }
+    return token;
+}
+
+std::optional<SignInCredentials> parseMagicToken(const std::string& token) {
+    const size_t colon = token.find(':');
+    if (colon == std::string::npos || colon == 0 || colon + 1 == token.size()) return std::nullopt;
+    return SignInCredentials{token.substr(0, colon), token.substr(colon + 1)};
 }
 
 } // namespace tuxblox
