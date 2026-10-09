@@ -24,6 +24,9 @@ bootstrapper/third_party/
 *.pyc
 *.dll
 *.exe
+# A Wine source folder, not a Windows binary: *.exe hid it from every commit,
+# so a fresh clone could not configure Wine at all.
+!compat/wine/dlls/ntoskrnl.exe/
 *.so
 *.archived
 
