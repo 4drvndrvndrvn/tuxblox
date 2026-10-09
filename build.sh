@@ -27,6 +27,7 @@ debug=1
 force_deps=0
 log_enabled=0
 stage_only=0
+part=all
 for arg in "$@"; do
     case "$arg" in
         --nodebug) debug=0 ;;
@@ -37,8 +38,22 @@ for arg in "$@"; do
         # everything under releases/ is derived from build/, so it can always
         # be regenerated as long as build/ is intact.
         --stage-only) stage_only=1 ;;
+        # Build one half of a release and leave it in build/ unpublished: the
+        # four programs and the interface stack, or the compatibility layer.
+        # The layer alone is most of a build's time, so this lets the two run
+        # on separate machines at once (see .github/workflows/build.yml).
+        # Neither half can be checked or published on its own -- put both
+        # into one build/, run shared/tools/check-host-deps.sh, then
+        # --stage-only.
+        --programs-only) part=programs ;;
+        --compat-only) part=compat ;;
     esac
 done
+
+# True when this run builds the given half, programs or compat.
+building() {
+    [[ "$part" == all || "$part" == "$1" ]]
+}
 
 # A build records the commit it started from, and deploy.sh refuses to publish
 # anything dirty, anything that is not HEAD, or anything not already on main at
@@ -310,13 +325,19 @@ logged() {
 }
 
 apply_patches() {
-    echo ":: Reloading the compatibility layer's submodules to their recorded commit"
-    # Scoped to compat: --force discards local changes, and shared/ui/libadwaita is a fork that gets worked on.
-    git submodule update --init --force -- compat
+    # A --programs-only build never reads these, and they are most of the checkout.
+    if building compat; then
+        echo ":: Reloading the compatibility layer's submodules to their recorded commit"
+        # Scoped to compat: --force discards local changes, and shared/ui/libadwaita is a fork that gets worked on.
+        git submodule update --init --force -- compat
+    fi
 
     # The libraries TuxBlox ships are only checked out, never reset, so work in progress there survives a build.
     echo ":: Making sure the shared libraries are checked out"
     git submodule update --init -- shared
+
+    # Every patch below is the compatibility layer's.
+    building compat || return 0
 
     local patches_dir="compat/patches"
 
@@ -711,9 +732,11 @@ else
 fi
 
 step "Checking rootless podman and warming the old-glibc builder images"
-run_step "check_podman" strict bash -c 'podman info >/dev/null \
+# The compatibility layer's image (the Steam Runtime SDK, plus glib built for
+# both architectures) is the slow one, and only that half uses it.
+run_step "check_podman" strict env TUXBLOX_PART="$part" bash -c 'podman info >/dev/null \
     && podman build -t tuxblox-old-glibc-builder -f Containerfile . \
-    && podman build -t tuxblox-compat-builder -f Containerfile.compat .'
+    && { [ "$TUXBLOX_PART" = programs ] || podman build -t tuxblox-compat-builder -f Containerfile.compat .; }'
 
 step "Reloading submodules and applying patches"
 run_step "apply_patches" strict apply_patches
@@ -739,132 +762,145 @@ ensure_shared_libs() {
 step "Building the libraries TuxBlox ships (OpenSSL, curl, libarchive and the rest)"
 run_step "build_shared_libs" strict logged ensure_shared_libs
 
-step "Building the installer's interface stack (GTK4 + libadwaita, the first run takes a long time)"
-run_step "build_ui_stack" strict logged ensure_ui_stack
+if building programs; then
+    step "Building the installer's interface stack (GTK4 + libadwaita, the first run takes a long time)"
+    run_step "build_ui_stack" strict logged ensure_ui_stack
 
-step "Building TuxBlox Installer (podman, old-glibc baseline)"
-run_step "build_installer" strict logged env TUXBLOX_SKIP_DEPS=1 ./installer/build.sh
+    step "Building TuxBlox Installer (podman, old-glibc baseline)"
+    run_step "build_installer" strict logged env TUXBLOX_SKIP_DEPS=1 ./installer/build.sh
 
-step "Staging installer output into build/"
+    step "Staging installer output into build/"
 
-rm -f build/TuxBloxInstaller
-mv installer/build build/.artifacts/installer
-mv build/.artifacts/installer/TuxBloxInstaller build/TuxBloxInstaller
+    rm -f build/TuxBloxInstaller
+    mv installer/build build/.artifacts/installer
+    mv build/.artifacts/installer/TuxBloxInstaller build/TuxBloxInstaller
 
-step "Building TuxBlox Bootstrapper (podman, old-glibc baseline)"
-run_step "build_bootstrapper" strict logged env TUXBLOX_SKIP_DEPS=1 ./bootstrapper/build.sh
+    step "Building TuxBlox Bootstrapper (podman, old-glibc baseline)"
+    run_step "build_bootstrapper" strict logged env TUXBLOX_SKIP_DEPS=1 ./bootstrapper/build.sh
 
-step "Staging bootstrapper output into build/"
+    step "Staging bootstrapper output into build/"
 
-rm -f build/TuxBloxBootstrapper
-mv bootstrapper/build build/.artifacts/bootstrapper
-mv build/.artifacts/bootstrapper/TuxBloxBootstrapper build/TuxBloxBootstrapper
+    rm -f build/TuxBloxBootstrapper
+    mv bootstrapper/build build/.artifacts/bootstrapper
+    mv build/.artifacts/bootstrapper/TuxBloxBootstrapper build/TuxBloxBootstrapper
 
-# Before the launcher, which is the slowest of the four: studio-mcp compiles
-# launcher sources, so a mistake in them surfaces here in seconds rather than
-# after the whole launcher build.
-step "Building TuxBlox Studio MCP (podman, old-glibc baseline)"
-run_step "build_studio_mcp" strict logged env TUXBLOX_SKIP_DEPS=1 ./studio-mcp/build.sh
+    # Before the launcher, which is the slowest of the four: studio-mcp compiles
+    # launcher sources, so a mistake in them surfaces here in seconds rather than
+    # after the whole launcher build.
+    step "Building TuxBlox Studio MCP (podman, old-glibc baseline)"
+    run_step "build_studio_mcp" strict logged env TUXBLOX_SKIP_DEPS=1 ./studio-mcp/build.sh
 
-step "Staging Studio MCP output into build/"
+    step "Staging Studio MCP output into build/"
 
-rm -f build/studio-mcp
-mv studio-mcp/build build/.artifacts/studio-mcp
-mv build/.artifacts/studio-mcp/studio-mcp build/studio-mcp
+    rm -f build/studio-mcp
+    mv studio-mcp/build build/.artifacts/studio-mcp
+    mv build/.artifacts/studio-mcp/studio-mcp build/studio-mcp
 
-step "Building TuxBlox Launcher (podman, old-glibc baseline)"
-run_step "build_launcher" strict logged env TUXBLOX_SKIP_DEPS=1 ./launcher/build.sh
+    step "Building TuxBlox Launcher (podman, old-glibc baseline)"
+    run_step "build_launcher" strict logged env TUXBLOX_SKIP_DEPS=1 ./launcher/build.sh
 
-step "Staging launcher output into build/"
+    step "Staging launcher output into build/"
 
-rm -f build/TuxBloxLauncher
-mv launcher/build build/.artifacts/launcher
-mv build/.artifacts/launcher/TuxBloxLauncher build/TuxBloxLauncher
-
-PROTON_BUILD_DIR="$ROOT/build/.artifacts/proton"
-mkdir -p "$PROTON_BUILD_DIR"
-cd "$PROTON_BUILD_DIR"
-
-# The compatibility layer's reverse-engineering knobs (TUXBLOX_DIAG_*,
-# TUXBLOX_TEST_*, TUXBLOX_HOST_FILES) are compiled out unless this is a developer
-# build. They redirect control flow, write memory, inject into the client image
-# and lift the host-file sandbox, so shipping them would hand any local program
-# an injection toolkit behind an environment variable. Default is a release build
-# with none of them; a developer opts in with TUXBLOX_DEV_TOOLS=1 ./build.sh, and
-# the flag must reach configure so wine records it.
-if [[ -n "${TUXBLOX_DEV_TOOLS:-}" ]]; then
-    export CFLAGS="${CFLAGS:-} -DTUXBLOX_DEV_TOOLS"
-    export CROSSCFLAGS="${CROSSCFLAGS:-} -DTUXBLOX_DEV_TOOLS"
-    step "Developer build: diagnostic and test knobs are ENABLED (TUXBLOX_DEV_TOOLS)"
-else
-    step "Release build: diagnostic and test knobs are compiled out"
+    rm -f build/TuxBloxLauncher
+    mv launcher/build build/.artifacts/launcher
+    mv build/.artifacts/launcher/TuxBloxLauncher build/TuxBloxLauncher
 fi
 
-step "Configuring Proton (ccache enabled for faster rebuilds)"
-run_step "configure_proton" strict logged "$ROOT/compat/configure.sh" --enable-ccache
+if building compat; then
+    PROTON_BUILD_DIR="$ROOT/build/.artifacts/proton"
+    mkdir -p "$PROTON_BUILD_DIR"
+    cd "$PROTON_BUILD_DIR"
 
-step "First-pass build (1/4) (using $JOBS parallel jobs)"
-run_step "first_pass_build" allow-fail logged make -j"$JOBS"
+    # The compatibility layer's reverse-engineering knobs (TUXBLOX_DIAG_*,
+    # TUXBLOX_TEST_*, TUXBLOX_HOST_FILES) are compiled out unless this is a developer
+    # build. They redirect control flow, write memory, inject into the client image
+    # and lift the host-file sandbox, so shipping them would hand any local program
+    # an injection toolkit behind an environment variable. Default is a release build
+    # with none of them; a developer opts in with TUXBLOX_DEV_TOOLS=1 ./build.sh, and
+    # the flag must reach configure so wine records it.
+    if [[ -n "${TUXBLOX_DEV_TOOLS:-}" ]]; then
+        export CFLAGS="${CFLAGS:-} -DTUXBLOX_DEV_TOOLS"
+        export CROSSCFLAGS="${CROSSCFLAGS:-} -DTUXBLOX_DEV_TOOLS"
+        step "Developer build: diagnostic and test knobs are ENABLED (TUXBLOX_DEV_TOOLS)"
+    else
+        step "Release build: diagnostic and test knobs are compiled out"
+    fi
 
-step "Fetching external sources (2/4)"
-run_step "fetch_external_sources" strict bash -c 'cd src-glslang && rm -rf External/spirv-tools External/googletest && python3 update_glslang_sources.py'
+    step "Configuring Proton (ccache enabled for faster rebuilds)"
+    run_step "configure_proton" strict logged "$ROOT/compat/configure.sh" --enable-ccache
 
-step "Initializing nested submodules (3/4)"
-run_step "init_submodules" strict bash -c 'cd "$ROOT/compat/submodules/dxvk-nvapi" && git submodule update --init --recursive'
+    step "First-pass build (1/4) (using $JOBS parallel jobs)"
+    run_step "first_pass_build" allow-fail logged make -j"$JOBS"
 
-step "Ensuring wine x86_64 is configured"
-run_step "configure_wine_x86_64" strict logged make wine-x86_64-configure
+    step "Fetching external sources (2/4)"
+    run_step "fetch_external_sources" strict bash -c 'cd src-glslang && rm -rf External/spirv-tools External/googletest && python3 update_glslang_sources.py'
 
-step "Ensuring x86_64 NLS data is built"
-run_step "build_x86_64_nls" strict bash -c 'cd obj-wine-x86_64 && make nls/locale.nls'
+    step "Initializing nested submodules (3/4)"
+    run_step "init_submodules" strict bash -c 'cd "$ROOT/compat/submodules/dxvk-nvapi" && git submodule update --init --recursive'
 
-step "Resuming build (4/4) (using $JOBS parallel jobs)"
-run_step "resume_build" strict logged make -j"$JOBS"
+    step "Ensuring wine x86_64 is configured"
+    run_step "configure_wine_x86_64" strict logged make wine-x86_64-configure
 
-step "Compiling proton launcher"
-run_step "compile_proton_native" strict bash -c '
-    set -e
-    podman build -t tuxblox-old-glibc-builder -f "$ROOT/Containerfile" "$ROOT"
+    step "Ensuring x86_64 NLS data is built"
+    run_step "build_x86_64_nls" strict bash -c 'cd obj-wine-x86_64 && make nls/locale.nls'
 
-    workdir="$(mktemp -d)"
-    mkdir -p "$workdir/src" "$workdir/out"
-    cp -a "$ROOT"/compat/tuxblox/src/. "$workdir/src/"
-    "$ROOT/compat/tuxblox/tools/embed-data.py" "$ROOT/compat/tuxblox/data" "$workdir/src/embedded_data.h"
+    step "Resuming build (4/4) (using $JOBS parallel jobs)"
+    run_step "resume_build" strict logged make -j"$JOBS"
 
-    # Run through sh so the find runs inside the container.
-    podman run --rm --userns=keep-id -v "$workdir:/work:Z" -w /work/src \
-        -v "$ROOT/build/.artifacts/shared:/shared:ro,z" \
-        -e TUXBLOX_BUILD_VERSION -e TUXBLOX_CHANNEL \
-        tuxblox-old-glibc-builder sh -c \
-        '"'"'g++ -std=c++17 -O2 -Wall -Wextra -static-libstdc++ -static-libgcc -I. -I/shared/include \
-            -DTUXBLOX_VERSION="\"$TUXBLOX_BUILD_VERSION\"" \
-            -DTUXBLOX_CHANNEL="\"$TUXBLOX_CHANNEL\"" \
-            -o /work/out/main $(find . -name "*.cpp") \
-            /shared/lib/libcrypto.a -ldl -lpthread'"'"'
+    step "Compiling proton launcher"
+    run_step "compile_proton_native" strict bash -c '
+        set -e
+        podman build -t tuxblox-old-glibc-builder -f "$ROOT/Containerfile" "$ROOT"
 
-    install -m 755 "$workdir/out/main" dist/main
-    rm -rf "$workdir"
-'
+        workdir="$(mktemp -d)"
+        mkdir -p "$workdir/src" "$workdir/out"
+        cp -a "$ROOT"/compat/tuxblox/src/. "$workdir/src/"
+        "$ROOT/compat/tuxblox/tools/embed-data.py" "$ROOT/compat/tuxblox/data" "$workdir/src/embedded_data.h"
 
-step "Clearing up unnecessary junk"
-shopt -s nullglob
-if [ -z "$TUXBLOX_KEEP_OBJ" ]; then
-    rm -rf obj-* dst-*
+        # Run through sh so the find runs inside the container.
+        podman run --rm --userns=keep-id -v "$workdir:/work:Z" -w /work/src \
+            -v "$ROOT/build/.artifacts/shared:/shared:ro,z" \
+            -e TUXBLOX_BUILD_VERSION -e TUXBLOX_CHANNEL \
+            tuxblox-old-glibc-builder sh -c \
+            '"'"'g++ -std=c++17 -O2 -Wall -Wextra -static-libstdc++ -static-libgcc -I. -I/shared/include \
+                -DTUXBLOX_VERSION="\"$TUXBLOX_BUILD_VERSION\"" \
+                -DTUXBLOX_CHANNEL="\"$TUXBLOX_CHANNEL\"" \
+                -o /work/out/main $(find . -name "*.cpp") \
+                /shared/lib/libcrypto.a -ldl -lpthread'"'"'
+
+        install -m 755 "$workdir/out/main" dist/main
+        rm -rf "$workdir"
+    '
+
+    step "Clearing up unnecessary junk"
+    shopt -s nullglob
+    if [ -z "$TUXBLOX_KEEP_OBJ" ]; then
+        rm -rf obj-* dst-*
+    fi
+    shopt -u nullglob
+
+    cd "$ROOT"
+
+    step "Staging Proton"
+    mv "$PROTON_BUILD_DIR/dist" build/compat
+
+    step "Copying licenses into Proton"
+    cp -a LICENSE build/compat/LICENSE
+    rm -rf build/compat/third_party_licenses
+    cp -a third_party_licenses build/compat/third_party_licenses
+
+    step "Aliasing the graphics driver"
+    alias_graphics_driver
 fi
-shopt -u nullglob
 
-cd "$ROOT"
-
-step "Staging Proton"
-mv "$PROTON_BUILD_DIR/dist" build/compat
-
-step "Copying licenses into Proton"
-cp -a LICENSE build/compat/LICENSE
-rm -rf build/compat/third_party_licenses
-cp -a third_party_licenses build/compat/third_party_licenses
-
-step "Aliasing the graphics driver"
-alias_graphics_driver
+# The dependency check below needs every program in build/ and staging needs
+# both halves, so a half build stops here with its output left in build/.
+if [[ "$part" != all ]]; then
+    echo "Built the $part half of TuxBlox $TUXBLOX_BUILD_VERSION into build/."
+    echo "Put the other half into the same build/, run shared/tools/check-host-deps.sh build,"
+    echo "then ./build.sh --stage-only to publish it."
+    exit 0
+fi
 
 # Runs here because compat/main only reaches build/compat once Proton has been staged above.
 step "Checking every program loads only what it is expected to"
