@@ -159,6 +159,16 @@ bool saveSignIn(const std::string& installDir, const SignInCredentials& credenti
     return true;
 }
 
+SignInCredentials demoSignIn() {
+    return {"tuxblox-demo-user", "tuxblox-demo-password"};
+}
+
+bool seedDemoSignIn(const std::string& installDir) {
+    std::error_code ec;
+    if (fs::exists(signInFilePath(installDir), ec)) return true;
+    return saveSignIn(installDir, demoSignIn());
+}
+
 bool forgetSignIn(const std::string& installDir) {
     std::error_code ec;
     fs::remove(signInFilePath(installDir), ec);

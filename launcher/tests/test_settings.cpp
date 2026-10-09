@@ -544,26 +544,28 @@ int main() {
         assert(pairs.back() == "TUXBLOX_DEBUG=0");
     }
 
-    // Automatic sign-in is off by default, survives a round trip, and a
-    // settings.json from before it existed loads with it off.
+    // Automatic sign-in is on by default (with the demo account), survives a
+    // round trip switched off, and a settings.json from before it existed
+    // loads with it on.
     {
-        assert(Settings{}.autoSignIn == false);
+        assert(Settings{}.autoSignIn == true);
 
         Settings s;
-        s.autoSignIn = true;
+        s.autoSignIn = false;
         saveSettings(dir, s);
-        assert(loadSettings(dir).autoSignIn == true);
+        assert(loadSettings(dir).autoSignIn == false);
 
         std::ofstream out(dir + "/settings.json", std::ios::binary);
         out << R"({"env_vars": "", "send_crash_reports": false})";
         out.close();
-        assert(loadSettings(dir).autoSignIn == false);
+        assert(loadSettings(dir).autoSignIn == true);
     }
 
-    // launchEnvPairs(): off is the default and emits nothing, even with an
-    // install directory to point into.
+    // launchEnvPairs(): off emits nothing, even with an install directory to
+    // point into.
     {
         Settings s;
+        s.autoSignIn = false;
         auto pairs = launchEnvPairs(s, "/opt/tuxblox");
         assert(pairs.size() == 1);
         assert(pairs[0] == "TUXBLOX_WEBVIEW_GPU=1");

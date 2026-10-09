@@ -118,10 +118,11 @@ struct Settings {
     // this.
     std::string theme = "system";
     // Fills in and submits Studio's login page with the account saved by
-    // sign_in.h. Off by default, and like haptics only the non-default is
-    // emitted. Only the switch lives here: the account itself is kept out of
+    // sign_in.h. On by default, with sign_in.h's made-up demo account, so the
+    // feature can be seen working on a fresh install; nothing is emitted while
+    // it is off. Only the switch lives here: the account itself is kept out of
     // settings.json, in a file of its own -- see sign_in.h for why.
-    bool autoSignIn = false;
+    bool autoSignIn = true;
     // Written into the active Roblox version's ClientSettings folder at every
     // launch -- see fastflag_file.h for why it can't just be written once.
     FastFlagSet fastFlags;

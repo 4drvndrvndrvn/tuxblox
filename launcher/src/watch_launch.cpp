@@ -24,6 +24,7 @@
 #include "roblox_log_capture.h"
 #include "roblox_place_info.h"
 #include "settings.h"
+#include "sign_in.h"
 #include "studio_presence.h"
 #include "system_info.h"
 #include "ui_adw/message_box.h"
@@ -62,6 +63,9 @@ int runWatchAndLaunch(const std::string& installDir, LaunchTarget target, const 
     // Straight after the install rather than only once the session ends, so a
     // first-ever install gets its menu entry right away.
     exportPrefixShortcuts(installDir, selfExePath());
+    // Here as well as in the launcher window, because a desktop shortcut on a
+    // fresh install reaches Studio without the window ever having opened.
+    if (settings.autoSignIn) seedDemoSignIn(installDir);
     // launchEnvPairs(), not parseEnvPairs(settings.envVars): a launch started
     // from a desktop shortcut has to carry the graphics-card selection too,
     // and this is the path that does not go through the running launcher.

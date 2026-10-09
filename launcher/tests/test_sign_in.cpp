@@ -155,6 +155,31 @@ int main() {
         assert(loadSignIn(dir).username.empty());
     }
 
+    // The demo account is seeded only where nothing is saved: it never
+    // replaces an account the user typed in.
+    {
+        fs::remove_all(dir);
+        assert(seedDemoSignIn(dir));
+        SignInCredentials c = loadSignIn(dir);
+        assert(c.username == demoSignIn().username);
+        assert(c.password == demoSignIn().password);
+
+        assert(saveSignIn(dir, {"mine", "secret"}));
+        assert(seedDemoSignIn(dir));
+        assert(loadSignIn(dir).username == "mine");
+    }
+
+    // The demo username must never be a real account, or every install would
+    // send a wrong password for someone. Roblox usernames are letters, digits
+    // and at most one underscore -- a hyphen rules it out, and it is not an
+    // email address or a phone number either.
+    {
+        const std::string username = demoSignIn().username;
+        assert(username.find('-') != std::string::npos);
+        assert(username.find('@') == std::string::npos);
+        assert(!demoSignIn().password.empty());
+    }
+
     // The file is written into a directory that does not exist yet, the way a
     // fresh install's would be.
     {

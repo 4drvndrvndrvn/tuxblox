@@ -75,4 +75,16 @@ bool saveSignIn(const std::string& installDir, const SignInCredentials& credenti
 // Deletes the file. True when no file is left, including when there was none.
 bool forgetSignIn(const std::string& installDir);
 
+// A made-up account, so a fresh install shows automatic sign-in working with
+// nothing to set up first: Studio's login page fills itself in, Log In is
+// pressed, and Roblox answers that the details are wrong. It cannot be anyone's
+// real account -- Roblox usernames may not contain a hyphen -- so the wrong
+// password it sends never counts against a real person. Replaced by typing a
+// real account in Settings > Roblox account.
+SignInCredentials demoSignIn();
+
+// Saves demoSignIn() when no account is saved yet, and leaves a saved one
+// alone. True when a sign-in file is there afterwards.
+bool seedDemoSignIn(const std::string& installDir);
+
 } // namespace tuxblox
