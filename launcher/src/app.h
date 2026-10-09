@@ -24,6 +24,7 @@
 #include "lnk_resolver.h"
 #include "prefix_session.h"
 #include "settings.h"
+#include "sign_in.h"
 #include "updater.h"
 #include "versions_manifest.h"
 
@@ -183,6 +184,14 @@ public:
     // Persists `settings` (settings.json), re-applies Global Environment
     // Variables to the launcher's own process, and updates the snapshot.
     void updateSettings(Settings settings);
+
+    // The account Studio's login page is filled in with (sign_in.h). Read
+    // from and written to its file directly rather than carried in the
+    // snapshot, so the password is not copied into every frame's snapshot.
+    // Called from the UI thread only.
+    SignInCredentials savedSignIn() const;
+    bool saveSignIn(const SignInCredentials& credentials);
+    bool forgetSignIn();
 
     // Called when the user clicks the UpdatePopup -- fetches the installer
     // for the release updateCheckThreadMain() offered and hands off to it,

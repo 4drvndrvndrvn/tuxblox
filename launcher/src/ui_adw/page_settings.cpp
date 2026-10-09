@@ -45,6 +45,8 @@ SettingsPage::SettingsPage(App &app) : app_(app) {
     addToggle(pLauncher, "Minimize to background", "Automatically close this window whenever Roblox starts.",
               &Settings::minimizeToBackground);
 
+    buildAccount();
+
     buildUpdates();
     buildEnvironment();
 
@@ -95,6 +97,37 @@ void SettingsPage::buildTheme(AdwPreferencesGroup *pGroup) {
     pTheme_ = ADW_COMBO_ROW(pTheme);
     g_signal_connect(pTheme, "notify::selected", G_CALLBACK(onTheme), this);
     adw_preferences_group_add(pGroup, pTheme);
+}
+
+void SettingsPage::buildAccount() {
+    AdwPreferencesGroup *pGroup = addGroup("Roblox account");
+    adw_preferences_group_set_description(
+        pGroup, "Saved on this computer, in a file only your user can read. A verification code or a captcha "
+                "still has to be finished by hand.");
+
+    GtkWidget *pSwitch = plainSwitchRow("Sign in automatically",
+                                        "Log in to Studio with this account. Turning this off forgets it.");
+    pAutoSignIn_ = ADW_SWITCH_ROW(pSwitch);
+    g_signal_connect(pSwitch, "notify::active", G_CALLBACK(onAutoSignIn), this);
+    adw_preferences_group_add(pGroup, pSwitch);
+
+    GtkWidget *pUsername = adw_entry_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(pUsername), "Username, email or phone");
+    pUsername_ = ADW_ENTRY_ROW(pUsername);
+    gtk_widget_set_sensitive(pUsername, FALSE);
+    g_signal_connect(pUsername, "changed", G_CALLBACK(onSignInChanged), this);
+    adw_preferences_group_add(pGroup, pUsername);
+
+    GtkWidget *pPassword = adw_password_entry_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(pPassword), "Password");
+    pPassword_ = ADW_PASSWORD_ENTRY_ROW(pPassword);
+    gtk_widget_set_sensitive(pPassword, FALSE);
+    g_signal_connect(pPassword, "changed", G_CALLBACK(onSignInChanged), this);
+    adw_preferences_group_add(pGroup, pPassword);
+
+    // Not a row, so the group places it below its list
+    pSignInError_ = errorLabel();
+    adw_preferences_group_add(pGroup, pSignInError_);
 }
 
 void SettingsPage::buildUpdates() {
@@ -231,6 +264,50 @@ void SettingsPage::commitEnvironmentVariables() {
     app_.updateSettings(updated);
 }
 
+// Saved as it is typed rather than on Enter, so leaving the page mid-edit cannot lose it. The file is replaced in one rename each time, so the layer never reads a half-written one.
+void SettingsPage::commitSignIn() {
+    if (seeding_ || !adw_switch_row_get_active(pAutoSignIn_)) return;
+    const SignInCredentials credentials{gtk_editable_get_text(GTK_EDITABLE(pUsername_)),
+                                        gtk_editable_get_text(GTK_EDITABLE(pPassword_))};
+    showError(pSignInError_, app_.saveSignIn(credentials) ? ""
+                                                          : "The account could not be saved. Check that the TuxBlox "
+                                                            "folder can be written to.");
+}
+
+void SettingsPage::setSignInFields(const SignInCredentials &credentials) {
+    const bool wasSeeding = seeding_;
+    seeding_ = true;
+    gtk_editable_set_text(GTK_EDITABLE(pUsername_), credentials.username.c_str());
+    gtk_editable_set_text(GTK_EDITABLE(pPassword_), credentials.password.c_str());
+    seeding_ = wasSeeding;
+}
+
+void SettingsPage::onAutoSignIn(GObject *pRow, GParamSpec *, gpointer data) {
+    auto *pSelf = static_cast<SettingsPage *>(data);
+    const bool active = adw_switch_row_get_active(ADW_SWITCH_ROW(pRow));
+    gtk_widget_set_sensitive(GTK_WIDGET(pSelf->pUsername_), active);
+    gtk_widget_set_sensitive(GTK_WIDGET(pSelf->pPassword_), active);
+    if (pSelf->seeding_) return;
+
+    Settings updated = pSelf->app_.snapshot().settings;
+    updated.autoSignIn = active;
+    pSelf->app_.updateSettings(updated);
+    if (active) {
+        pSelf->commitSignIn();
+        return;
+    }
+    // Off forgets the account rather than keeping it for later: a password has no business staying on disk for a feature that is not being used.
+    pSelf->setSignInFields(SignInCredentials{});
+    showError(pSelf->pSignInError_, pSelf->app_.forgetSignIn()
+                                        ? ""
+                                        : "The saved account could not be deleted. Remove the sign-in file in the "
+                                          "TuxBlox folder by hand.");
+}
+
+void SettingsPage::onSignInChanged(GtkEditable *, gpointer data) {
+    static_cast<SettingsPage *>(data)->commitSignIn();
+}
+
 void SettingsPage::onEnvironmentActivate(GtkEntry *, gpointer data) {
     static_cast<SettingsPage *>(data)->commitEnvironmentVariables();
 }
@@ -283,6 +360,11 @@ void SettingsPage::seed(const Settings &settings) {
     adw_combo_row_set_selected(pGpu_, gpuIndex);
     gtk_editable_set_text(GTK_EDITABLE(pEnvironment_), settings.envVars.c_str());
     for (const auto &toggle : toggles_) adw_switch_row_set_active(toggle->pRow, settings.*(toggle->pField));
+    // notify::active only fires on a change, so with the switch left at its default the fields' sensitivity would never be set
+    adw_switch_row_set_active(pAutoSignIn_, settings.autoSignIn);
+    gtk_widget_set_sensitive(GTK_WIDGET(pUsername_), settings.autoSignIn);
+    gtk_widget_set_sensitive(GTK_WIDGET(pPassword_), settings.autoSignIn);
+    setSignInFields(settings.autoSignIn ? app_.savedSignIn() : SignInCredentials{});
     seeding_ = false;
     seeded_ = true;
 }

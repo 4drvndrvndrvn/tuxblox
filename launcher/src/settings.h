@@ -117,6 +117,11 @@ struct Settings {
     // it took the website's. Only the window is affected -- Roblox never sees
     // this.
     std::string theme = "system";
+    // Fills in and submits Studio's login page with the account saved by
+    // sign_in.h. Off by default, and like haptics only the non-default is
+    // emitted. Only the switch lives here: the account itself is kept out of
+    // settings.json, in a file of its own -- see sign_in.h for why.
+    bool autoSignIn = false;
     // Written into the active Roblox version's ClientSettings folder at every
     // launch -- see fastflag_file.h for why it can't just be written once.
     FastFlagSet fastFlags;
@@ -144,6 +149,9 @@ std::vector<std::string> parseEnvPairs(const std::string& text);
 // Defined here rather than at each call site because there are two of them
 // (the running launcher and a --watch-launch desktop shortcut) and they must
 // not disagree about what a launch's environment is.
-std::vector<std::string> launchEnvPairs(const Settings& settings);
+//
+// installDir is where the saved sign-in lives (sign_in.h); left empty, the
+// variable pointing at it is not emitted even with autoSignIn on.
+std::vector<std::string> launchEnvPairs(const Settings& settings, const std::string& installDir = "");
 
 } // namespace tuxblox

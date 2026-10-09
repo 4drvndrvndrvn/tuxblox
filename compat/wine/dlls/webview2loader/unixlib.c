@@ -1153,6 +1153,205 @@ static NTSTATUS unix_init_impl(void *args)
     return ok ? STATUS_SUCCESS : STATUS_NOT_SUPPORTED;
 }
 
+/* --- Automatic sign-in ---
+ *
+ * With "Sign in automatically" on, the launcher saves the Roblox account to a
+ * file and points TUXBLOX_SIGN_IN_FILE at it (launcher/src/sign_in.h owns the
+ * format). Every visible webview then gets one extra document-start script,
+ * which returns straight away on any page but Roblox's own login page -- the
+ * one Studio's OAuth authorize URL redirects to when nobody is signed in --
+ * and there fills in the account and presses Log In.
+ *
+ * It goes through WV2L_OP_ADD_USER_SCRIPT, the opcode Studio's own
+ * AddScriptToExecuteOnDocumentCreated already uses, so it asks nothing of the
+ * webview host that the host in the shipped WebKit bundle does not already do.
+ *
+ * The script submits at most once per login window: it leaves a flag in the
+ * page's sessionStorage before submitting, so a wrong password shows Roblox's
+ * error and stops there instead of being sent again on every reload, which
+ * would be a fast way to get the account rate-limited. It also stands back
+ * if the password field already has something in it, i.e. someone is typing.
+ * Captchas and two-step verification are left to the person, as they should.
+ *
+ * Nothing in it hides the account from the login page's own scripts, and
+ * nothing could: that is the page the password is being typed into. What it
+ * does keep it from is every other page and frame, which return before the
+ * account is decoded. */
+
+/* Long enough for any real account three times over (percent-encoding can
+ * triple a field), short enough that the script stays far below
+ * WV2L_USER_SCRIPT_MAX. */
+#define SIGN_IN_FIELD_MAX 1024
+
+static const char sign_in_script_head[] =
+    "(function () {\n"
+    "    'use strict';\n"
+    "    var path = location.pathname.toLowerCase();\n"
+    "    if (window.top !== window || location.protocol !== 'https:' || location.hostname !== 'www.roblox.com' ||\n"
+    "        (path !== '/login' && path !== '/login/' && path !== '/newlogin' && path !== '/newlogin/'))\n"
+    "        return;\n"
+    "    var key = 'tuxblox-auto-sign-in';\n"
+    "    try {\n"
+    "        if (window.sessionStorage.getItem(key)) return;\n"
+    "    } catch (e) {\n"
+    "        return;\n"
+    "    }\n"
+    "    var later = window.setTimeout.bind(window);\n"
+    "    var setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;\n"
+    "    var deadline = Date.now() + 30000;\n"
+    "    var username, password;\n"
+    "    try {\n"
+    "        username = decodeURIComponent('";
+static const char sign_in_script_middle[] =
+    "');\n"
+    "        password = decodeURIComponent('";
+static const char sign_in_script_tail[] =
+    "');\n"
+    "    } catch (e) {\n"
+    "        return;\n"
+    "    }\n"
+    /* The value goes in through the prototype's own setter, then an input
+     * event: the login form is React, which keeps its own copy of each field
+     * and only takes a new value from an input event on a node whose value
+     * it did not set itself. */
+    "    function fill(input, value) {\n"
+    "        input.focus();\n"
+    "        setValue.call(input, value);\n"
+    "        input.dispatchEvent(new Event('input', { bubbles: true }));\n"
+    "        input.dispatchEvent(new Event('change', { bubbles: true }));\n"
+    "    }\n"
+    /* Roblox ships two layouts: the older has a plain button with this id, the
+     * newer a submit button in the form. Either can still be disabled for a
+     * moment while React re-renders with the new values. */
+    "    function submit(form) {\n"
+    "        var button = document.getElementById('login-button') || (form && form.querySelector('button[type=submit]'));\n"
+    "        if (button && button.disabled && Date.now() < deadline) {\n"
+    "            later(function () { submit(form); }, 100);\n"
+    "        } else if (button && !button.disabled) {\n"
+    "            button.click();\n"
+    "        } else if (form && form.requestSubmit) {\n"
+    "            form.requestSubmit();\n"
+    "        }\n"
+    "    }\n"
+    /* The form is drawn by script after the document loads, so it is waited
+     * for rather than expected at document start. */
+    "    function attempt() {\n"
+    "        var usernameInput = document.getElementById('login-username');\n"
+    "        var passwordInput = document.getElementById('login-password');\n"
+    "        if (!usernameInput || !passwordInput) {\n"
+    "            if (Date.now() < deadline) later(attempt, 250);\n"
+    "            return;\n"
+    "        }\n"
+    "        if (passwordInput.value) return;\n"
+    "        try {\n"
+    "            window.sessionStorage.setItem(key, '1');\n"
+    "        } catch (e) {\n"
+    "            return;\n"
+    "        }\n"
+    "        fill(usernameInput, username);\n"
+    "        fill(passwordInput, password);\n"
+    "        later(function () { submit(passwordInput.form); }, 250);\n"
+    "    }\n"
+    "    attempt();\n"
+    "})();\n";
+
+/* Exactly the characters the launcher's percent-encoding produces. Checked
+ * rather than trusted, because it is what lets a field go between the quotes
+ * above with no escaping: none of them can end a string or a line. Spelled out
+ * rather than isalnum(), which follows the locale. */
+static BOOL sign_in_field_is_encoded(const char *field)
+{
+    for (; *field; field++)
+    {
+        char c = *field;
+        if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+              c == '-' || c == '.' || c == '_' || c == '~' || c == '%'))
+            return FALSE;
+    }
+    return TRUE;
+}
+
+/* Reads the account into the two buffers, still percent-encoded. FALSE, with
+ * nothing to sign in with, unless both fields are there and well-formed. The
+ * file is read each time rather than once, so an account changed in the
+ * launcher applies to the next login window without restarting Studio. */
+static BOOL read_sign_in(char *username, char *password)
+{
+    const char *path = getenv("TUXBLOX_SIGN_IN_FILE");
+    char line[SIGN_IN_FIELD_MAX + 16];
+    BOOL ok = TRUE;
+    FILE *file;
+
+    username[0] = password[0] = 0;
+    if (!path || !*path) return FALSE;
+    /* "e" is O_CLOEXEC: the webview host is forked from this process, and
+     * has no business inheriting this file. */
+    if (!(file = fopen(path, "re")))
+    {
+        /* Switched on with nothing saved yet is ordinary, not worth a line. */
+        if (errno != ENOENT) WARN("could not open the saved sign-in: %s\n", strerror(errno));
+        return FALSE;
+    }
+
+    while (ok && fgets(line, sizeof(line), file))
+    {
+        char *value;
+
+        if (!strchr(line, '\n') && !feof(file))
+        {
+            WARN("the saved sign-in has a line too long to be an account -- not signing in\n");
+            ok = FALSE;
+            break;
+        }
+        line[strcspn(line, "\r\n")] = 0;
+        if (!line[0] || line[0] == '#' || !(value = strchr(line, '='))) continue;
+        *value++ = 0;
+        if (strlen(value) >= SIGN_IN_FIELD_MAX || !sign_in_field_is_encoded(value))
+        {
+            WARN("the saved sign-in's %s is not in the form the launcher writes -- not signing in\n", line);
+            ok = FALSE;
+        }
+        else if (!strcmp(line, "username")) strcpy(username, value);
+        else if (!strcmp(line, "password")) strcpy(password, value);
+    }
+    fclose(file);
+    return ok && username[0] && password[0];
+}
+
+static void append_ascii(uint16_t *dst, size_t *len, const char *src)
+{
+    while (*src) dst[(*len)++] = (unsigned char)*src++;
+}
+
+/* Never fails the webview over this: a login page that is not filled in is
+ * just the login page, which is how it was before. */
+static void install_sign_in_script(UINT64 handle)
+{
+    char username[SIGN_IN_FIELD_MAX], password[SIGN_IN_FIELD_MAX];
+    struct wv2l_add_user_script_params *wire;
+    size_t len = 0;
+
+    if (!read_sign_in(username, password)) return;
+
+    /* Heap, not stack -- see unix_add_user_script_impl. Every part is ASCII,
+     * so widening each byte is the whole UTF-16 conversion, and the total is
+     * bounded by SIGN_IN_FIELD_MAX well inside the wire buffer. */
+    if (!(wire = calloc(1, sizeof(*wire)))) return;
+    wire->handle = handle;
+    append_ascii(wire->script, &len, sign_in_script_head);
+    append_ascii(wire->script, &len, username);
+    append_ascii(wire->script, &len, sign_in_script_middle);
+    append_ascii(wire->script, &len, password);
+    append_ascii(wire->script, &len, sign_in_script_tail);
+    wire->script[len] = 0;
+
+    if (!ipc_call_handle(WV2L_OP_ADD_USER_SCRIPT, wire, sizeof(*wire), &wire->handle) || !wire->success)
+        WARN("could not install the automatic sign-in script -- the login page will be left to the user\n");
+    else
+        TRACE("automatic sign-in installed on webview %s\n", wine_dbgstr_longlong(handle));
+    free(wire);
+}
+
 static NTSTATUS unix_create_webview_impl(void *args)
 {
     struct create_webview_params *params = args;
@@ -1166,6 +1365,10 @@ static NTSTATUS unix_create_webview_impl(void *args)
         return STATUS_NOT_SUPPORTED;
     }
     params->handle = tagged;
+    /* Before Studio has had the handle back, so before it can navigate: a
+     * user script only applies to documents loaded after it is added. A
+     * message-only controller never shows a page anyone could log in on. */
+    if (tagged && !params->is_message_only) install_sign_in_script(tagged);
     return tagged ? STATUS_SUCCESS : STATUS_NOT_SUPPORTED;
 }
 

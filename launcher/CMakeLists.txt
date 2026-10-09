@@ -126,6 +126,7 @@ add_library(launcher_core STATIC
     src/copyright_file.cpp
     src/license_file.cpp
     src/settings.cpp
+    src/sign_in.cpp
     src/fastflag_file.cpp
     src/fastflag_import.cpp
     src/versions_manifest.cpp

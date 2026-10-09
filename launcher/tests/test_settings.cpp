@@ -20,6 +20,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 
 namespace fs = std::filesystem;
@@ -541,6 +542,64 @@ int main() {
         assert(pairs.size() == 3);
         assert(pairs[1] == "TUXBLOX_DEBUG=1");
         assert(pairs.back() == "TUXBLOX_DEBUG=0");
+    }
+
+    // Automatic sign-in is off by default, survives a round trip, and a
+    // settings.json from before it existed loads with it off.
+    {
+        assert(Settings{}.autoSignIn == false);
+
+        Settings s;
+        s.autoSignIn = true;
+        saveSettings(dir, s);
+        assert(loadSettings(dir).autoSignIn == true);
+
+        std::ofstream out(dir + "/settings.json", std::ios::binary);
+        out << R"({"env_vars": "", "send_crash_reports": false})";
+        out.close();
+        assert(loadSettings(dir).autoSignIn == false);
+    }
+
+    // launchEnvPairs(): off is the default and emits nothing, even with an
+    // install directory to point into.
+    {
+        Settings s;
+        auto pairs = launchEnvPairs(s, "/opt/tuxblox");
+        assert(pairs.size() == 1);
+        assert(pairs[0] == "TUXBLOX_WEBVIEW_GPU=1");
+    }
+
+    // launchEnvPairs(): on, it emits where the account is saved -- never the
+    // account -- and the user's own variables still come last.
+    {
+        Settings s;
+        s.autoSignIn = true;
+        s.envVars = "FOO=bar";
+
+        auto pairs = launchEnvPairs(s, "/opt/tux blox");
+        assert(pairs.size() == 3);
+        assert(pairs[1] == "TUXBLOX_SIGN_IN_FILE=/opt/tux blox/sign-in");
+        assert(pairs.back() == "FOO=bar");
+    }
+
+    // launchEnvPairs(): with no install directory there is nothing to point
+    // at, so nothing is emitted.
+    {
+        Settings s;
+        s.autoSignIn = true;
+        auto pairs = launchEnvPairs(s);
+        assert(pairs.size() == 1);
+    }
+
+    // The account itself never lands in settings.json.
+    {
+        Settings s;
+        s.autoSignIn = true;
+        saveSettings(dir, s);
+        std::ifstream in(dir + "/settings.json", std::ios::binary);
+        std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        assert(text.find("password") == std::string::npos);
+        assert(text.find("username") == std::string::npos);
     }
 
     fs::remove_all(dir);

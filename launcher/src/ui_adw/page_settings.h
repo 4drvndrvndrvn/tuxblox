@@ -42,17 +42,22 @@ private:
     AdwPreferencesGroup *addGroup(const char *pTitle);
     void addToggle(AdwPreferencesGroup *pGroup, const char *pTitle, const char *pSubtitle, bool Settings::*pField);
     void buildTheme(AdwPreferencesGroup *pGroup);
+    void buildAccount();
     void buildUpdates();
     void buildEnvironment();
     void buildDangerZone();
     void seed(const Settings &settings);
     void commitEnvironmentVariables();
+    void commitSignIn();
+    void setSignInFields(const SignInCredentials &credentials);
     GtkButton *dangerButton(GtkWidget *pRow, const char *pLabel, GCallback onClicked);
 
     static void onToggle(GObject *pRow, GParamSpec *, gpointer data);
     static void onChannel(GObject *pRow, GParamSpec *, gpointer data);
     static void onTheme(GObject *pRow, GParamSpec *, gpointer data);
     static void onGpu(GObject *pRow, GParamSpec *, gpointer data);
+    static void onAutoSignIn(GObject *pRow, GParamSpec *, gpointer data);
+    static void onSignInChanged(GtkEditable *, gpointer data);
     static void onEnvironmentActivate(GtkEntry *, gpointer data);
     static void onEnvironmentFocusLeft(GtkEventControllerFocus *, gpointer data);
     static void onTerminate(GtkButton *pButton, gpointer data);
@@ -69,6 +74,10 @@ private:
     AdwComboRow *pChannel_ = nullptr;
     AdwComboRow *pGpu_ = nullptr;
     GtkEntry *pEnvironment_ = nullptr;
+    AdwSwitchRow *pAutoSignIn_ = nullptr;
+    AdwEntryRow *pUsername_ = nullptr;
+    AdwPasswordEntryRow *pPassword_ = nullptr;
+    GtkWidget *pSignInError_ = nullptr;
     GtkButton *pTerminate_ = nullptr;
     // True from a Terminate click until its result has been shown on the button.
     bool terminateAwaited_ = false;

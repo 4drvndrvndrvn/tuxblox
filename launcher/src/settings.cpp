@@ -16,6 +16,7 @@
 
 #include "settings.h"
 #include "json.hpp"
+#include "sign_in.h"
 #include "system_info.h"
 #include <filesystem>
 #include <fstream>
@@ -128,6 +129,7 @@ Settings loadSettings(const std::string& installDir) {
         settings.discordRpc = j.value("discord_rpc", false);
         const std::string theme = j.value("theme", std::string("system"));
         settings.theme = isKnownTheme(theme) ? theme : "system";
+        settings.autoSignIn = j.value("auto_sign_in", false);
 
         const auto fastFlags = j.find("fast_flags");
         if (fastFlags != j.end()) {
@@ -164,6 +166,7 @@ void saveSettings(const std::string& installDir, const Settings& settings) {
         j["gpu"] = settings.gpu;
         j["discord_rpc"] = settings.discordRpc;
         j["theme"] = settings.theme;
+        j["auto_sign_in"] = settings.autoSignIn;
         j["fast_flags"] = {{"player", fastFlagsToJson(settings.fastFlags.player)},
                             {"studio", fastFlagsToJson(settings.fastFlags.studio)}};
 
@@ -187,7 +190,7 @@ std::vector<std::string> parseEnvPairs(const std::string& text) {
     return pairs;
 }
 
-std::vector<std::string> launchEnvPairs(const Settings& settings) {
+std::vector<std::string> launchEnvPairs(const Settings& settings, const std::string& installDir) {
     // Skipped entirely for the "Automatic" default, so the common case does
     // not walk sysfs at all and, more importantly, adds nothing whatsoever to
     // the environment a launch has always had.
@@ -218,6 +221,14 @@ std::vector<std::string> launchEnvPairs(const Settings& settings) {
     // which cost frame time.
     if (settings.debugLogging) {
         pairs.push_back("TUXBLOX_DEBUG=1");
+    }
+
+    // Only the non-default is emitted, as with haptics above. The path rather
+    // than the account: the environment reaches every process Roblox starts.
+    // Sent whether or not anything is saved there yet -- a missing file is
+    // how the layer learns there is nothing to sign in with.
+    if (settings.autoSignIn && !installDir.empty()) {
+        pairs.push_back(std::string(kSignInFileEnvVar) + "=" + signInFilePath(installDir));
     }
 
     // Appended second so that a duplicate variable here is the one that wins:

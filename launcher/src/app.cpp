@@ -459,12 +459,25 @@ void App::updateSettings(Settings settings) {
         // to re-apply too -- otherwise picking a card would do nothing until
         // the launcher was restarted.
         envChanged = snapshot_.settings.envVars != settings.envVars ||
-                     snapshot_.settings.gpu != settings.gpu;
+                     snapshot_.settings.gpu != settings.gpu ||
+                     snapshot_.settings.autoSignIn != settings.autoSignIn;
         snapshot_.settings = settings;
     }
     if (envChanged) {
         applyEnvVars(settings);
     }
+}
+
+SignInCredentials App::savedSignIn() const {
+    return loadSignIn(installDir_);
+}
+
+bool App::saveSignIn(const SignInCredentials& credentials) {
+    return tuxblox::saveSignIn(installDir_, credentials);
+}
+
+bool App::forgetSignIn() {
+    return tuxblox::forgetSignIn(installDir_);
 }
 
 void App::requestUpdateNow() {
@@ -519,7 +532,7 @@ void App::applyEnvVars(const Settings& settings) {
     // later calls from updateSettings() (user edits, on the render thread)
     // accept the same small, already-documented race rather than adding
     // cross-thread coordination for a rare, user-initiated edit.
-    for (const auto& kv : launchEnvPairs(settings)) {
+    for (const auto& kv : launchEnvPairs(settings, installDir_)) {
         auto pos = kv.find('=');
         setenv(kv.substr(0, pos).c_str(), kv.substr(pos + 1).c_str(), 1);
     }
