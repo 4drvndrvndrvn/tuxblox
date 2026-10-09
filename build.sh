@@ -299,7 +299,10 @@ report_failure_cause() {
     local total_lines last_match_from_end last_match_line
 
     total_lines=$(wc -l < "$BUILD_LOG")
-    last_match_from_end=$(tac "$BUILD_LOG" | grep -n -E -i -m1 "$pattern" | cut -d: -f1)
+    # || true: under pipefail, grep finding nothing (exit 1) or stopping tac
+    # early at its first match (SIGPIPE) would end the script right here,
+    # before it says anything at all.
+    last_match_from_end=$(tac "$BUILD_LOG" | grep -n -E -i -m1 "$pattern" | cut -d: -f1 || true)
 
     if [[ -z "$last_match_from_end" ]]; then
         echo "!! Could not isolate a specific error pattern. Last 60 lines of build.log:" >&2
