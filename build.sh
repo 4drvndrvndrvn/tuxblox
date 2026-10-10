@@ -839,7 +839,13 @@ if building compat; then
     run_step "fetch_external_sources" strict bash -c 'cd src-glslang && rm -rf External/spirv-tools External/googletest && python3 update_glslang_sources.py'
 
     step "Initializing nested submodules (3/4)"
-    run_step "init_submodules" strict bash -c 'cd "$ROOT/compat/submodules/dxvk-nvapi" && git submodule update --init --recursive'
+    # Both keep their headers (Vulkan, SPIR-V, DirectX) and dxvk its shader
+    # compiler as submodules of their own, which the non-recursive update in
+    # apply_patches leaves empty -- a tree where they were once filled in by
+    # hand builds, a fresh clone stops at "Missing Vulkan-Headers". Picked up
+    # by the resumed build, which re-syncs any src-<package> that differs.
+    run_step "init_submodules" strict bash -c 'cd "$ROOT/compat/submodules/dxvk" && git submodule update --init --recursive \
+        && cd "$ROOT/compat/submodules/dxvk-nvapi" && git submodule update --init --recursive'
 
     step "Ensuring wine x86_64 is configured"
     run_step "configure_wine_x86_64" strict logged make wine-x86_64-configure
