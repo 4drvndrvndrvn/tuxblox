@@ -27,7 +27,9 @@ GlibcFloor="GLIBC_2.25"
 # Libraries that have to come from the machine: the C library and the loader.
 GlibcNames='^(libc|libm|libdl|libpthread|librt|libresolv|libutil|libanl)\.so\.[0-9]+$'
 # Driver- and display-coupled libraries, which must match what is installed rather than be shipped.
-HostGraphicsNames='^lib(X11|X11-xcb|Xau|Xdmcp|Xext|Xrender|Xi|Xrandr|Xcursor|Xdamage|Xfixes|Xinerama|Xtst|Xss|xcb|xcb-render|xcb-shm|xcb-dri2|xcb-dri3|xcb-glx|xcb-present|xcb-sync|xcb-xfixes|xcb-randr|xcb-shape|xcb-util|xshmfence|drm|gbm|GL|GLX|EGL|GLdispatch|OpenGL|wayland-client|wayland-cursor|wayland-egl|xkbcommon|xkbcommon-x11)\.so\.[0-9]+$'
+# libbsd and libmd come with them on Debian and Ubuntu, whose libXdmcp needs libbsd (which needs libmd), so every
+# X11 program loads both there; nothing TuxBlox ships asks for either.
+HostGraphicsNames='^lib(X11|X11-xcb|Xau|Xdmcp|Xext|Xrender|Xi|Xrandr|Xcursor|Xdamage|Xfixes|Xinerama|Xtst|Xss|xcb|xcb-render|xcb-shm|xcb-dri2|xcb-dri3|xcb-glx|xcb-present|xcb-sync|xcb-xfixes|xcb-randr|xcb-shape|xcb-util|xshmfence|drm|gbm|GL|GLX|EGL|GLdispatch|OpenGL|wayland-client|wayland-cursor|wayland-egl|xkbcommon|xkbcommon-x11|bsd|md)\.so\.[0-9]+$'
 
 # Each binary, and whether it may load the interface stack and the display libraries alongside the C library.
 Binaries=(
